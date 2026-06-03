@@ -1,0 +1,53 @@
+name: Release
+
+# Builds the private app source for Windows + macOS, signs the update artifacts,
+# and publishes a GitHub Release here (public) including the updater latest.json.
+on:
+  workflow_dispatch:
+    inputs:
+      ref:
+        description: "Source branch/tag/sha to build"
+        default: main
+  repository_dispatch:
+    types: [release]
+
+jobs:
+  release:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [macos-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - name: Checkout private source
+        uses: actions/checkout@v4
+        with:
+          repository: Ben-Timan-Smartech/smartech-brand-asset-manager
+          ref: ${{ github.event.inputs.ref || github.event.client_payload.ref || 'main' }}
+          ssh-key: ${{ secrets.SOURCE_DEPLOY_KEY }}
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri
+
+      - run: npm ci
+
+      - name: Build, sign & publish release
+        uses: tauri-apps/tauri-action@v0
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+        with:
+          tagName: app-v__VERSION__
+          releaseName: "tm:rw Brand Asset Manager v__VERSION__"
+          releaseBody: "Automated release. The app updates itself via Settings → Check for updates."
+          releaseDraft: false
+          prerelease: false
