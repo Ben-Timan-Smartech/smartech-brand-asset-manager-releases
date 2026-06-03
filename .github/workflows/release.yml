@@ -18,6 +18,7 @@ jobs:
   release:
     strategy:
       fail-fast: false
+      max-parallel: 1
       matrix:
         os: [macos-latest, windows-latest]
     runs-on: ${{ matrix.os }}
@@ -52,5 +53,20 @@ jobs:
           tagName: app-v__VERSION__
           releaseName: "tm:rw Brand Asset Manager v__VERSION__"
           releaseBody: "Automated release. The app updates itself via Settings → Check for updates."
-          releaseDraft: false
+          releaseDraft: true
           prerelease: false
+
+  publish-release:
+    needs: release
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Publish the finished draft release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          REPO: ${{ github.repository }}
+        run: |
+          TAG=$(gh release list --repo "$REPO" --json tagName,isDraft --jq '[.[]|select(.isDraft)][0].tagName')
+          echo "Publishing $TAG"
+          gh release edit "$TAG" --repo "$REPO" --draft=false --latest
