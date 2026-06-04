@@ -43,6 +43,19 @@ jobs:
 
       - run: npm ci
 
+      - name: Extract release notes from CHANGELOG
+        id: notes
+        shell: bash
+        run: |
+          V=$(node -p "require('./src-tauri/tauri.conf.json').version")
+          NOTES=$(awk -v h="## v$V" '$0==h{f=1;next} f&&/^## /{exit} f{print}' CHANGELOG.md)
+          [ -z "$NOTES" ] && NOTES="Release v$V"
+          {
+            echo "body<<__NOTES_EOF__"
+            echo "$NOTES"
+            echo "__NOTES_EOF__"
+          } >> "$GITHUB_OUTPUT"
+
       - name: Build, sign & publish release
         uses: tauri-apps/tauri-action@v0
         env:
@@ -52,7 +65,7 @@ jobs:
         with:
           tagName: app-v__VERSION__
           releaseName: "tm:rw Brand Asset Manager v__VERSION__"
-          releaseBody: "Automated release. The app updates itself via Settings → Check for updates."
+          releaseBody: ${{ steps.notes.outputs.body }}
           releaseDraft: true
           prerelease: false
 
