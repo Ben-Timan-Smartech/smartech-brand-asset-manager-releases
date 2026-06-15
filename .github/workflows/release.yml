@@ -56,6 +56,25 @@ jobs:
             echo "__NOTES_EOF__"
           } >> "$GITHUB_OUTPUT"
 
+      - name: Fetch HandBrakeCLI sidecar
+        shell: bash
+        run: |
+          set -e
+          VER=1.11.2
+          mkdir -p src-tauri/binaries
+          if [ "${{ matrix.os }}" = "windows-latest" ]; then
+            curl -sL -o hb.zip "https://github.com/HandBrake/HandBrake/releases/download/$VER/HandBrakeCLI-$VER-win-x86_64.zip"
+            unzip -o hb.zip -d hb >/dev/null
+            cp "$(find hb -name 'HandBrakeCLI.exe' | head -1)" "src-tauri/binaries/handbrakecli-x86_64-pc-windows-msvc.exe"
+          else
+            curl -sL -o hb.dmg "https://github.com/HandBrake/HandBrake/releases/download/$VER/HandBrakeCLI-$VER.dmg"
+            MNT=$(hdiutil attach -nobrowse -readonly hb.dmg | tail -1 | awk '{print $NF}')
+            cp "$MNT/HandBrakeCLI" "src-tauri/binaries/handbrakecli-aarch64-apple-darwin"
+            hdiutil detach "$MNT" >/dev/null
+            chmod +x "src-tauri/binaries/handbrakecli-aarch64-apple-darwin"
+          fi
+          ls -l src-tauri/binaries
+
       - name: Build, sign & publish release
         uses: tauri-apps/tauri-action@v0
         env:
