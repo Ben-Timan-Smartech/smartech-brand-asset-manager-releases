@@ -2,6 +2,11 @@ name: Release
 
 # Builds the private app source for Windows + macOS, signs the update artifacts,
 # and publishes a GitHub Release here (public) including the updater latest.json.
+#
+# The draft release is created ONCE up front (create-release), then the macOS and
+# Windows builds run in PARALLEL and upload to that same release by id — so the
+# two OS builds no longer run one-after-the-other (which is why releases used to
+# take ~2x as long). publish-release then flips the finished draft to Latest.
 on:
   workflow_dispatch:
     inputs:
@@ -15,10 +20,62 @@ permissions:
   contents: write
 
 jobs:
-  release:
+  create-release:
+    runs-on: ubuntu-latest
+    outputs:
+      release_id: ${{ steps.create.outputs.result }}
+      version: ${{ steps.notes.outputs.version }}
+    steps:
+      - name: Checkout private source
+        uses: actions/checkout@v4
+        with:
+          repository: Ben-Timan-Smartech/smartech-brand-asset-manager
+          ref: ${{ github.event.inputs.ref || github.event.client_payload.ref || 'main' }}
+          ssh-key: ${{ secrets.SOURCE_DEPLOY_KEY }}
+
+      - name: Version + release notes from CHANGELOG
+        id: notes
+        shell: bash
+        run: |
+          V=$(node -p "require('./src-tauri/tauri.conf.json').version")
+          NOTES=$(awk -v h="## v$V" '$0==h{f=1;next} f&&/^## /{exit} f{print}' CHANGELOG.md)
+          [ -z "$NOTES" ] && NOTES="Release v$V"
+          echo "version=$V" >> "$GITHUB_OUTPUT"
+          {
+            echo "body<<__NOTES_EOF__"
+            echo "$NOTES"
+            echo "__NOTES_EOF__"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Create draft release
+        id: create
+        uses: actions/github-script@v7
+        env:
+          VERSION: ${{ steps.notes.outputs.version }}
+          NOTES: ${{ steps.notes.outputs.body }}
+        with:
+          result-encoding: string
+          script: |
+            const tag = `app-v${process.env.VERSION}`;
+            // Reuse an existing draft for this tag if a prior run left one, else create.
+            const list = await github.rest.repos.listReleases({ owner: context.repo.owner, repo: context.repo.repo, per_page: 50 });
+            const existing = list.data.find(r => r.tag_name === tag && r.draft);
+            if (existing) return String(existing.id);
+            const { data } = await github.rest.repos.createRelease({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              tag_name: tag,
+              name: `tm:rw Brand Asset Manager v${process.env.VERSION}`,
+              body: process.env.NOTES,
+              draft: true,
+              prerelease: false,
+            });
+            return String(data.id);
+
+  build:
+    needs: create-release
     strategy:
       fail-fast: false
-      max-parallel: 1
       matrix:
         os: [macos-latest, windows-latest]
     runs-on: ${{ matrix.os }}
@@ -43,19 +100,6 @@ jobs:
 
       - run: npm ci
 
-      - name: Extract release notes from CHANGELOG
-        id: notes
-        shell: bash
-        run: |
-          V=$(node -p "require('./src-tauri/tauri.conf.json').version")
-          NOTES=$(awk -v h="## v$V" '$0==h{f=1;next} f&&/^## /{exit} f{print}' CHANGELOG.md)
-          [ -z "$NOTES" ] && NOTES="Release v$V"
-          {
-            echo "body<<__NOTES_EOF__"
-            echo "$NOTES"
-            echo "__NOTES_EOF__"
-          } >> "$GITHUB_OUTPUT"
-
       - name: Fetch HandBrakeCLI sidecar
         shell: bash
         run: |
@@ -75,21 +119,17 @@ jobs:
           fi
           ls -l src-tauri/binaries
 
-      - name: Build, sign & publish release
+      - name: Build, sign & upload to the release
         uses: tauri-apps/tauri-action@v0
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
         with:
-          tagName: app-v__VERSION__
-          releaseName: "tm:rw Brand Asset Manager v__VERSION__"
-          releaseBody: ${{ steps.notes.outputs.body }}
-          releaseDraft: true
-          prerelease: false
+          releaseId: ${{ needs.create-release.outputs.release_id }}
 
   publish-release:
-    needs: release
+    needs: [create-release, build]
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -98,7 +138,7 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           REPO: ${{ github.repository }}
+          TAG: app-v${{ needs.create-release.outputs.version }}
         run: |
-          TAG=$(gh release list --repo "$REPO" --json tagName,isDraft --jq '[.[]|select(.isDraft)][0].tagName')
           echo "Publishing $TAG"
           gh release edit "$TAG" --repo "$REPO" --draft=false --latest
