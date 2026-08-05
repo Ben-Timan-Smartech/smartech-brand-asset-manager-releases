@@ -25,6 +25,7 @@ jobs:
     outputs:
       release_id: ${{ steps.create.outputs.result }}
       version: ${{ steps.notes.outputs.version }}
+      body: ${{ steps.notes.outputs.body }}
     steps:
       - name: Checkout private source
         uses: actions/checkout@v4
@@ -133,6 +134,10 @@ jobs:
           # this block ONLY once the Developer ID cert + the six secrets exist.
         with:
           releaseId: ${{ needs.create-release.outputs.release_id }}
+          # Feed the CHANGELOG notes into the generated latest.json so the in-app
+          # updater's "what's new" is populated (tauri-action leaves it empty
+          # otherwise — it does not read the existing release body for this).
+          releaseBody: ${{ needs.create-release.outputs.body }}
 
   publish-release:
     needs: [create-release, build]
