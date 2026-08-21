@@ -1,0 +1,6 @@
+{
+  "displayName": "Brand Asset Manager",
+  "summary": "Release channel for the Brand Asset Manager desktop app (auto-update artifacts).",
+  "stage": "Live",
+  "audience": "internal"
+}
