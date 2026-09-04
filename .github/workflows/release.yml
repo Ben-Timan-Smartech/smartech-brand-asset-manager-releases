@@ -127,11 +127,17 @@ jobs:
           # Updater signature (Tauri minisign) — lets the auto-updater trust builds.
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
-          # NOTE: Apple code-signing env (APPLE_CERTIFICATE / APPLE_SIGNING_IDENTITY
-          # / notarization creds) is intentionally NOT wired here yet. Passing those
-          # vars while the secrets are empty makes tauri's macOS bundler enter the
-          # signing path and fail at `security import` (empty keychain cert). Re-add
-          # this block ONLY once the Developer ID cert + the six secrets exist.
+          # Apple Developer ID code-signing + notarization (macOS). tauri-action
+          # imports the cert into a temp keychain and notarizes when these are set;
+          # on the Windows runner they're ignored. All six live as repo secrets —
+          # if any is cleared, macOS builds fail at signing, so keep them in lockstep
+          # with the Developer ID cert (Smartech Retail Group Limited, team UMA27C5QJ3).
+          APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
+          APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
+          APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_PASSWORD: ${{ secrets.APPLE_PASSWORD }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
         with:
           releaseId: ${{ needs.create-release.outputs.release_id }}
           # Feed the CHANGELOG notes into the generated latest.json so the in-app
