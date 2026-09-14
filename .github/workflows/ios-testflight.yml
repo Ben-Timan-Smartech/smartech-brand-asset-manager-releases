@@ -1,0 +1,116 @@
+name: iOS TestFlight
+
+# Builds the private app source for iPhone/iPad (Tauri 2 iOS target) and uploads
+# to TestFlight. Runs on a macOS runner, so no local Mac is needed.
+#
+# PREREQUISITES (all are repo secrets on THIS repo, added by Ben from the Apple
+# Developer portal — see HANDOVER-IOS-MAC.md / BUILD-IOS.md in the source repo):
+#   SOURCE_DEPLOY_KEY          – already present (checks out the private source)
+#   APPLE_TEAM_ID              – already present (UMA27C5QJ3)
+#   IOS_DIST_CERT_P12          – base64 of the iOS Distribution cert (.p12)
+#   IOS_DIST_CERT_PASSWORD     – its export password
+#   IOS_PROVISIONING_PROFILE   – base64 of the App Store .mobileprovision for
+#                                the bundle id tmrw.brand-asset-manager
+#   ASC_KEY_ID                 – App Store Connect API key id
+#   ASC_ISSUER_ID              – App Store Connect issuer id
+#   ASC_API_KEY_P8             – contents of the API key .p8 file
+#
+# The SOURCE must already carry the iOS gating (Phase 0, done) and the iOS
+# build config (Cargo cfg(desktop) split + src-tauri/tauri.ios.conf.json). If the
+# first run fails at compile or signing, that's expected iteration — fix the
+# source and re-dispatch. See HANDOVER-IOS-MAC.md.
+
+on:
+  workflow_dispatch:
+    inputs:
+      ref:
+        description: "Source branch/tag/sha to build (default: the ios branch)"
+        default: ios
+
+permissions:
+  contents: read
+
+jobs:
+  ios:
+    runs-on: macos-latest
+    steps:
+      - name: Checkout private source
+        uses: actions/checkout@v4
+        with:
+          repository: Ben-Timan-Smartech/smartech-brand-asset-manager
+          ref: ${{ github.event.inputs.ref || 'ios' }}
+          ssh-key: ${{ secrets.SOURCE_DEPLOY_KEY }}
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: aarch64-apple-ios,aarch64-apple-ios-sim
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri
+
+      - run: npm ci
+
+      - name: Import signing certificate + provisioning profile
+        env:
+          IOS_DIST_CERT_P12: ${{ secrets.IOS_DIST_CERT_P12 }}
+          IOS_DIST_CERT_PASSWORD: ${{ secrets.IOS_DIST_CERT_PASSWORD }}
+          IOS_PROVISIONING_PROFILE: ${{ secrets.IOS_PROVISIONING_PROFILE }}
+          ASC_KEY_ID: ${{ secrets.ASC_KEY_ID }}
+          ASC_API_KEY_P8: ${{ secrets.ASC_API_KEY_P8 }}
+        run: |
+          set -euo pipefail
+          KEYCHAIN="$RUNNER_TEMP/app-signing.keychain-db"
+          KPW="$(uuidgen)"
+          security create-keychain -p "$KPW" "$KEYCHAIN"
+          security set-keychain-settings -lut 21600 "$KEYCHAIN"
+          security unlock-keychain -p "$KPW" "$KEYCHAIN"
+          echo "$IOS_DIST_CERT_P12" | base64 --decode > "$RUNNER_TEMP/cert.p12"
+          security import "$RUNNER_TEMP/cert.p12" -P "$IOS_DIST_CERT_PASSWORD" -A -t cert -f pkcs12 -k "$KEYCHAIN"
+          security list-keychains -d user -s "$KEYCHAIN" login.keychain-db
+          security set-key-partition-list -S apple-tool:,apple: -s -k "$KPW" "$KEYCHAIN" >/dev/null
+
+          # Provisioning profile — install for xcodebuild to find by bundle id.
+          PROFILES="$HOME/Library/MobileDevice/Provisioning Profiles"
+          mkdir -p "$PROFILES"
+          echo "$IOS_PROVISIONING_PROFILE" | base64 --decode > "$PROFILES/app.mobileprovision"
+
+          # App Store Connect API key for the TestFlight upload.
+          mkdir -p "$HOME/private_keys"
+          echo "$ASC_API_KEY_P8" > "$HOME/private_keys/AuthKey_${ASC_KEY_ID}.p8"
+
+      - name: Tauri iOS build (App Store export)
+        env:
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+          CI: "true"
+        run: |
+          set -euo pipefail
+          # Generate the Xcode project (idempotent) then build a signed .ipa.
+          # If the source doesn't yet compile for iOS, this is where it fails — fix
+          # the cfg(desktop) gating in the source and re-run (see HANDOVER-IOS-MAC.md).
+          npm run tauri ios init -- --ci
+          npm run tauri ios build -- --export-method app-store-connect
+
+      - name: Upload to TestFlight
+        env:
+          ASC_KEY_ID: ${{ secrets.ASC_KEY_ID }}
+          ASC_ISSUER_ID: ${{ secrets.ASC_ISSUER_ID }}
+        run: |
+          set -euo pipefail
+          IPA="$(find src-tauri/gen/apple -name '*.ipa' -print -quit)"
+          echo "Uploading $IPA"
+          xcrun altool --upload-app --type ios --file "$IPA" \
+            --apiKey "$ASC_KEY_ID" --apiIssuer "$ASC_ISSUER_ID"
+
+      - name: Save the .ipa as an artifact (fallback if upload needs tuning)
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ios-ipa
+          path: src-tauri/gen/apple/**/*.ipa
+          if-no-files-found: ignore
