@@ -87,9 +87,22 @@ jobs:
       - name: Tauri iOS build (App Store export)
         env:
           APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+          APPLE_DEVELOPMENT_TEAM: ${{ secrets.APPLE_TEAM_ID }}
+          # The Tauri CLI has first-class CI signing support: given these, it
+          # imports the cert, installs the profile, sets the signing build
+          # settings AND writes a complete ExportOptions.plist containing
+          # `provisioningProfiles`. Without them it writes only `method`, and
+          # exportArchive fails with "requires a provisioning profile" on a
+          # manually-signed archive.
+          IOS_CERTIFICATE: ${{ secrets.IOS_DIST_CERT_P12 }}
+          IOS_CERTIFICATE_PASSWORD: ${{ secrets.IOS_DIST_CERT_PASSWORD }}
+          IOS_MOBILE_PROVISION: ${{ secrets.IOS_PROVISIONING_PROFILE }}
+          APPLE_API_KEY: ${{ secrets.ASC_KEY_ID }}
+          APPLE_API_ISSUER: ${{ secrets.ASC_ISSUER_ID }}
           CI: "true"
         run: |
           set -euo pipefail
+          export APPLE_API_KEY_PATH="$HOME/private_keys/AuthKey_${{ secrets.ASC_KEY_ID }}.p8"
           # Generate the Xcode project (idempotent) then build a signed .ipa.
           # If the source doesn't yet compile for iOS, this is where it fails — fix
           # the cfg(desktop) gating in the source and re-run (see HANDOVER-IOS-MAC.md).
