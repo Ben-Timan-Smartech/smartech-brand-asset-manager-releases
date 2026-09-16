@@ -120,6 +120,36 @@ jobs:
           fi
           ls -l src-tauri/binaries
 
+      - name: Set up Azure Trusted Signing (Windows)
+        if: matrix.os == 'windows-latest'
+        shell: bash
+        env:
+          AZURE_TS_ENDPOINT: ${{ secrets.AZURE_TS_ENDPOINT }}
+          AZURE_TS_ACCOUNT: ${{ secrets.AZURE_TS_ACCOUNT }}
+          AZURE_TS_PROFILE: ${{ secrets.AZURE_TS_PROFILE }}
+        run: |
+          set -e
+          # trusted-signing-cli signs the installers via the Azure Trusted/Artifact
+          # Signing API. Tauri invokes it as the Windows signCommand DURING bundling,
+          # so the Authenticode signature is applied BEFORE the updater minisign is
+          # computed over the installer (signing AFTER would break auto-update).
+          cargo install trusted-signing-cli
+          # Written here (NOT in the source repo) so it only applies in CI — local
+          # Windows dev builds are unaffected. Tauri 2 auto-merges tauri.windows.conf.json.
+          cat > src-tauri/tauri.windows.conf.json <<JSON
+          {
+            "bundle": {
+              "windows": {
+                "signCommand": {
+                  "cmd": "trusted-signing-cli",
+                  "args": ["-e", "${AZURE_TS_ENDPOINT}", "-a", "${AZURE_TS_ACCOUNT}", "-c", "${AZURE_TS_PROFILE}", "%1"]
+                }
+              }
+            }
+          }
+          JSON
+          echo "Wrote src-tauri/tauri.windows.conf.json:"; cat src-tauri/tauri.windows.conf.json
+
       - name: Build, sign & upload to the release
         uses: tauri-apps/tauri-action@v0
         env:
@@ -138,6 +168,12 @@ jobs:
           APPLE_ID: ${{ secrets.APPLE_ID }}
           APPLE_PASSWORD: ${{ secrets.APPLE_PASSWORD }}
           APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+          # Azure Trusted/Artifact Signing (Windows). trusted-signing-cli — invoked
+          # as the Windows signCommand during bundling — authenticates with these via
+          # DefaultAzureCredential. Ignored on the macOS runner.
+          AZURE_TENANT_ID: ${{ secrets.AZURE_TENANT_ID }}
+          AZURE_CLIENT_ID: ${{ secrets.AZURE_CLIENT_ID }}
+          AZURE_CLIENT_SECRET: ${{ secrets.AZURE_CLIENT_SECRET }}
         with:
           releaseId: ${{ needs.create-release.outputs.release_id }}
           # Feed the CHANGELOG notes into the generated latest.json so the in-app
