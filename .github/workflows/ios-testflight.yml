@@ -84,6 +84,32 @@ jobs:
           mkdir -p "$HOME/private_keys"
           echo "$ASC_API_KEY_P8" > "$HOME/private_keys/AuthKey_${ASC_KEY_ID}.p8"
 
+      # Xcode 27 builds against the iOS 27 SDK, where an app that has not adopted
+      # the UIScene lifecycle is KILLED at launch (SIGTRAP in
+      # _UIApplicationEvaluateRuntimeIssueForNoSceneLifecycleAdoption). Tauri
+      # creates its UIWindow via the app-delegate path and does not support
+      # scenes yet, so we cannot adopt them: adding UIApplicationSceneManifest
+      # stops the crash but the window never attaches and the app renders BLANK.
+      # Both states were reproduced on an iOS 27.0 simulator on 2026-09-15.
+      #
+      # So pin the SDK until Tauri supports scenes upstream. Linking against the
+      # iOS 26 SDK keeps non-adoption a warning rather than fatal.
+      #
+      # This FAILS the build if no Xcode 26.x is present rather than silently
+      # falling through to 27 — a build that ships a blank app to testers is far
+      # worse than one that does not ship.
+      - name: Pin Xcode to 26.x (Tauri does not support UIScene yet)
+        run: |
+          set -euo pipefail
+          echo "Xcodes available:"; ls -d /Applications/Xcode*.app
+          APP="$(ls -d /Applications/Xcode_26*.app 2>/dev/null | sort -V | tail -1 || true)"
+          if [ -z "$APP" ]; then
+            echo "::error::No Xcode 26.x on this runner. Building with Xcode 27 would produce an app that crashes or renders blank on iOS 27 (Tauri has not adopted UIScene). Refusing to build — see BUILD-IOS.md."
+            exit 1
+          fi
+          sudo xcode-select -s "$APP/Contents/Developer"
+          xcodebuild -version
+
       - name: Tauri iOS build (App Store export)
         env:
           APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
