@@ -73,6 +73,18 @@ jobs:
             });
             return String(data.id);
 
+      - name: Attach app icon as a release asset
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG: app-v${{ steps.notes.outputs.version }}
+        shell: bash
+        run: |
+          # The GSD "tm:rw Apps" launcher reads this stable-named asset from
+          # /releases/latest to show the real app icon on the Brand Asset Manager
+          # card (the app's icon otherwise lives only in the private source).
+          cp src-tauri/icons/icon.png tmrw-icon.png
+          gh release upload "$TAG" tmrw-icon.png --repo "${{ github.repository }}" --clobber
+
   build:
     needs: create-release
     strategy:
