@@ -145,7 +145,12 @@ jobs:
           # Signing API. Tauri invokes it as the Windows signCommand DURING bundling,
           # so the Authenticode signature is applied BEFORE the updater minisign is
           # computed over the installer (signing AFTER would break auto-update).
-          cargo install trusted-signing-cli
+          # --locked + pinned: the crate's dependency zip 3.0.0 was yanked from
+          # crates.io (Oct 2026), so an unlocked install can't resolve it. The
+          # crate's own Cargo.lock still pins it, and Cargo honours yanked versions
+          # from a lockfile. (trusted-signing-cli is deprecated in favour of
+          # artifact-signing-cli; migrate when convenient.)
+          cargo install --locked trusted-signing-cli --version 0.11.0
           # Written here (NOT in the source repo) so it only applies in CI — local
           # Windows dev builds are unaffected. Tauri 2 auto-merges tauri.windows.conf.json.
           cat > src-tauri/tauri.windows.conf.json <<JSON
