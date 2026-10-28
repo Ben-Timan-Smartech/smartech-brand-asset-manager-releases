@@ -26,6 +26,11 @@ jobs:
       release_id: ${{ steps.create.outputs.result }}
       version: ${{ steps.notes.outputs.version }}
       body: ${{ steps.notes.outputs.body }}
+      # The exact commit this release is built from. Both platform builds check out
+      # THIS sha, not the branch name: on 28 Oct the mac job checked out `main` a
+      # few minutes later than create-release, after a held 0.2.219 bump landed, so
+      # the "v0.2.218" release shipped a 0.2.219 Mac build.
+      sha: ${{ steps.notes.outputs.sha }}
     steps:
       - name: Checkout private source
         uses: actions/checkout@v4
@@ -42,6 +47,7 @@ jobs:
           NOTES=$(awk -v h="## v$V" '$0==h{f=1;next} f&&/^## /{exit} f{print}' CHANGELOG.md)
           [ -z "$NOTES" ] && NOTES="Release v$V"
           echo "version=$V" >> "$GITHUB_OUTPUT"
+          echo "sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
           {
             echo "body<<__NOTES_EOF__"
             echo "$NOTES"
@@ -93,11 +99,11 @@ jobs:
         os: [macos-latest, windows-latest]
     runs-on: ${{ matrix.os }}
     steps:
-      - name: Checkout private source
+      - name: Checkout private source (the exact commit create-release used)
         uses: actions/checkout@v4
         with:
           repository: Ben-Timan-Smartech/smartech-brand-asset-manager
-          ref: ${{ github.event.inputs.ref || github.event.client_payload.ref || 'main' }}
+          ref: ${{ needs.create-release.outputs.sha }}
           ssh-key: ${{ secrets.SOURCE_DEPLOY_KEY }}
 
       - uses: actions/setup-node@v4
